@@ -1,0 +1,33 @@
+# 模型权重 (太大，用 Google Drive / HuggingFace 分享)
+finetune_out_*/
+finetune_out_SA_1B_100k_plus_docci/
+
+# WandB 日志
+wandb/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 内存文件
+memory/
+
+# 评测结果 (每次跑会重新生成)
+evaluation_results.html
+eval_output_raw.txt
+
+# IDE
+.vscode/
+
+# Playwright MCP
+.playwright-mcp/
+.mcp.json
+
+# 临时文件
+*.tmp
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
