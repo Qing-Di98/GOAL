@@ -2,10 +2,14 @@
 
 ## 实验配置
 - 基座模型: `openai/clip-vit-base-patch16`
-- 训练数据: DCI segment (5446 样本)
+- 训练数据: DCI segment_with_background (5446 样本)
 - 测试数据: DCI test set (~2000 样本)
-- 本地 GPU: NVIDIA GeForce RTX 4060 Laptop (8GB)
-- batch_size: 4, epochs: 10
+- epochs: 10
+
+| 版本 | 平台 | GPU | batch_size |
+|------|------|-----|:---:|
+| v1-v3 | Windows 本地 | RTX 4060 8GB | 4 |
+| v4 | 中科大 SCOW 集群 | A100 80GB / RTX 5090 32GB | 16 |
 
 ---
 
@@ -56,8 +60,9 @@
 
 ---
 
-## v3 - 修复 loss 函数（添加非对角线惩罚）
-**Git commit:** *(当前)*  
+## v3 - 修复 loss 函数 + 本地 RTX 4060 (bs=4)
+**平台:** 本地 Windows, RTX 4060 Laptop 8GB  
+**Git commit:** `5c99abe`  
 **日期:** 2026-07-18  
 **输出目录:** `finetune_out_v3/`  
 **改动:** 
@@ -80,7 +85,34 @@
 | R@25 | 2.05% | **18.11%** |
 | R@50 | 3.85% | **24.46%** |
 
-**结论:** ✅ 崩溃已修复。非对角线惩罚阻止了 embedding 坍缩。Local alignment 有效（I2T R@1 提升 42x）。全局检索仍弱于预训练 CLIP（batch_size=4 限制）。
+**结论:** ✅ 崩溃已修复。非对角线惩罚阻止了 embedding 坍缩。Local alignment 有效（I2T R@1 提升 42x）。
+
+---
+
+## v4 - 修复 loss 函数 + 中科大 SCOW 集群 (bs=16)
+**平台:** 中科大本科生算力平台 (SCOW), A100-SXM4-80GB / RTX 5090 32GB  
+**Git commit:** `5c99abe` (同 v3)  
+**日期:** 2026-07-18  
+**输出目录:** `finetune_out_v4/`  
+**配置:** batch_size=16, num_workers=0, epochs=10, srun 分配
+
+| 训练指标 | 初始 | 最终 |
+|----------|------|------|
+| org loss | — | 8.834 |
+| seg loss | — | 8.906 |
+| patch_sim | — | 0.916 |
+| text_sim | — | 0.938 |
+| patch loss (含 off-diag) | — | 0.046 |
+| text loss (含 off-diag) | — | 0.022 |
+
+| 检索指标 | T2I | I2T |
+|----------|-----|-----|
+| R@1 | 0.20% | **1.70%** |
+| R@5 | 0.80% | **5.95%** |
+| R@25 | 2.50% | **17.06%** |
+| R@50 | 3.90% | **23.71%** |
+
+**结论:** 无崩溃，patch_sim=0.916。结果与本地 bs=4 基本持平，bs=16 未带来额外提升（GPU bf16 精度差异 + num_workers=0 + 续跑导致优化器动量丢失）。
 
 ---
 
@@ -96,6 +128,8 @@
 
 ## 关键发现
 1. **MSE 对角惩罚 + 无非对角约束 = 必然崩溃** — 模型的最优解是把所有 embedding 变成同一个向量
-2. **数据质量重要但不是根因** — v2 修正了数据但未改变结局
-3. **batch_size=4 严重限制全局 CLIP loss** — 即使修了 local alignment，全局对比学习仍弱
-4. **下一步:** 增大 batch_size（集群 GPU）、添加 global-to-local 交互、考虑负采样策略
+2. **数据质量重要但不是根因** — v2 修正了 JSON 但未改变结局；loss 函数设计缺陷才是关键
+3. **非对角线惩罚有效阻止崩溃** — v3/v4 patch_sim 从 0.9999 降至 0.89~0.92，I2T R@1 从随机提升到 2%
+4. **batch_size 提升未带来增益** — bs=16 集群 vs bs=4 本地结果持平，推测 GPU bf16 精度差异 + num_workers=0 抵消了 bs 优势
+5. **全局 CLIP loss 仍弱** — 即使 bs=16，全局对比学习仍远不及预训练 CLIP（R@1 2% vs 48%）
+6. **下一步:** 进一步增大 batch_size（32-64，需 A100 80GB）、恢复 num_workers>0、从预训练权重热启动
