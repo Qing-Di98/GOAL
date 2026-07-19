@@ -154,17 +154,18 @@ class DLoaderMultiPositive(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        # Retry with next sample if current has missing files (NFS issues)
-        max_retries = 100
-        for attempt in range(max_retries):
+        # Retry with random sample if current has missing files (NFS issues)
+        max_retries = 1000
+        orig_idx = idx
+        for _ in range(max_retries):
             try:
                 item = self.data_list[idx]
                 org_image, org_image_size = self._load_image(item["original_filename"])
                 break
             except FileNotFoundError:
-                idx = (idx + 1) % len(self.data_list)
+                idx = random.randint(0, len(self.data_list) - 1)
         else:
-            raise RuntimeError(f"Could not find valid sample after {max_retries} retries")
+            raise RuntimeError(f"Could not find valid sample after {max_retries} retries (started at {orig_idx})")
 
         org_caption = item["original_caption"]
 
