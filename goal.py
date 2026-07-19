@@ -319,13 +319,7 @@ def train(fabric: L.Fabric, model: torch.nn.Module, optimizer: torch.optim.Optim
             # Compute patch alignment loss with cosine similarity directly
             sim_patch = patch_pooled @ seg_image_embeds.t()  # removed logit_scale
             patch_diag = torch.diag(sim_patch)
-            # Off-diagonal penalty: push non-matching pairs to 0 to prevent collapse
-            batch_size_curr = sim_patch.shape[0]
-            mask = torch.eye(batch_size_curr, device=sim_patch.device, dtype=torch.bool)
-            loss_patch_diag = mse_loss(patch_diag, torch.ones_like(patch_diag))
-            loss_patch_off = mse_loss(sim_patch[~mask], torch.zeros(batch_size_curr * (batch_size_curr - 1), device=sim_patch.device))
-            loss_patch = loss_patch_diag + loss_patch_off
-            
+            loss_patch = mse_loss(patch_diag, torch.ones_like(patch_diag))
             # Compute text-level alignment loss
             text_pooled = []
             for b in range(batch_size):
@@ -373,10 +367,7 @@ def train(fabric: L.Fabric, model: torch.nn.Module, optimizer: torch.optim.Optim
             # Compute text alignment loss with cosine similarity directly
             sim_text = text_pooled @ seg_text_embeds.t()  # removed logit_scale
             text_diag = torch.diag(sim_text)
-            # Off-diagonal penalty: push non-matching pairs to 0 to prevent collapse
-            loss_text_diag = mse_loss(text_diag, torch.ones_like(text_diag))
-            loss_text_off = mse_loss(sim_text[~mask], torch.zeros(batch_size_curr * (batch_size_curr - 1), device=sim_text.device))
-            loss_text = loss_text_diag + loss_text_off
+            loss_text = mse_loss(text_diag, torch.ones_like(text_diag))
             
             # Total loss
             loss = loss_org + 0.5 * loss_seg + loss_patch + loss_text
