@@ -154,8 +154,18 @@ class DLoaderMultiPositive(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        item = self.data_list[idx]
-        org_image, org_image_size = self._load_image(item["original_filename"])
+        # Retry with next sample if current has missing files (NFS issues)
+        max_retries = 100
+        for attempt in range(max_retries):
+            try:
+                item = self.data_list[idx]
+                org_image, org_image_size = self._load_image(item["original_filename"])
+                break
+            except FileNotFoundError:
+                idx = (idx + 1) % len(self.data_list)
+        else:
+            raise RuntimeError(f"Could not find valid sample after {max_retries} retries")
+
         org_caption = item["original_caption"]
 
         # Select top-K segments by similarity score
@@ -171,7 +181,10 @@ class DLoaderMultiPositive(Dataset):
         seg_texts_list = []
         bboxes_list = []
         for seg in top_segs:
-            seg_img, _ = self._load_image(seg["filename"])
+            try:
+                seg_img, _ = self._load_image(seg["filename"])
+            except FileNotFoundError:
+                continue  # Skip segments with missing files (NFS)
             seg_data = self.processor(images=seg_img, text=seg["caption"], return_tensors="pt",
                                       truncation=True, padding="max_length", max_length=self.new_max_token)
             seg_images_list.append(seg_data.pixel_values[0])
