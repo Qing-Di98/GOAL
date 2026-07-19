@@ -1,0 +1,42 @@
+=== 在 SCOW Shell 中逐行执行以下命令 ===
+
+第1行：下载最新 goal.py
+wget -q https://raw.githubusercontent.com/Qing-Di98/GOAL/main/goal.py -O goal.py && echo 'goal.py UPDATED'
+
+第2行：创建 sbatch 脚本（注意：整段一起复制粘贴，或逐行输入 > 开头的行）
+cat > cluster/run_goal_v4.sbatch << 'EOF'
+#!/bin/bash
+#SBATCH -J GOAL-bs64
+#SBATCH -p Students
+#SBATCH --qos=qos_stu_default
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH -t 02:00:00
+#SBATCH -o logs/%x-%j.out
+#SBATCH -e logs/%x-%j.err
+set -euo pipefail
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate goal
+export HF_ENDPOINT="https://hf-mirror.com"
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export HOME=/home/scc/pb24111693
+export DEEPSPEED_CONFIG_DIR=/home/scc/pb24111693/tmp/.deepspeed
+mkdir -p $DEEPSPEED_CONFIG_DIR
+cd ~/projects/GOAL
+nvidia-smi
+echo "Warming NFS cache..."
+find ~/GOAL_data/DCI/ -type f 2>/dev/null | wc -l
+echo "Starting training..."
+srun --export=ALL python goal.py \
+    --dataset datasets/DCI_segment_sim_bbox_del_org.json \
+    --batch_size 64 \
+    --num_workers 0 \
+    --epochs 10 \
+    --output_dir finetune_out_v4
+EOF
+
+第3行：提交作业
+sbatch cluster/run_goal_v4.sbatch
+
+第4行：查看作业
+squeue -u $USER
