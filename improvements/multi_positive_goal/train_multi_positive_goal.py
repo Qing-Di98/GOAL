@@ -26,7 +26,10 @@ import time
 import numpy as np
 from utils.func import *
 from utils.transforms import *
-from deepspeed.utils.zero_to_fp32 import convert_zero_checkpoint_to_fp32_state_dict
+try:
+    from deepspeed.utils.zero_to_fp32 import convert_zero_checkpoint_to_fp32_state_dict
+except ImportError:
+    convert_zero_checkpoint_to_fp32_state_dict = None
 import math
 import random
 import wandb
