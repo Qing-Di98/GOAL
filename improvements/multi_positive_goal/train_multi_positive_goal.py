@@ -373,7 +373,9 @@ def train(fabric, model, optimizer, train_loader, processor, args):
             seg_start = 0
             for b in range(batch_size):
                 # Use first (best) segment's bbox for patch alignment
-                bbox = bboxes[seg_start]
+                bbox_dict = bboxes[seg_start]
+                # Wrap scalar bbox values as 1-element tensors for get_patch_tokens_from_bbox
+                bbox = {k: torch.tensor([v], device=org_image.device) for k, v in bbox_dict.items()}
                 img_w = org_image_sizes[b][0]
                 img_h = org_image_sizes[b][1]
                 pooled = get_patch_tokens_from_bbox(
