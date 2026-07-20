@@ -280,10 +280,16 @@ def main(args):
         model = transformers.CLIPModel.from_pretrained(args.model)
         longclip_pos_embeddings(model, args.new_max_token)
 
-        if args.ckpt:
+        if args.ckpt or args.resume_epoch > 0:
+            if args.ckpt:
+                ckpt_path = args.ckpt
+            else:
+                ckpt_path = os.path.join(args.output_dir,
+                    f"GOAL_multi_pos_{os.path.splitext(os.path.basename(args.model))[0]}_"
+                    f"{os.path.splitext(os.path.basename(args.dataset))[0]}_{args.resume_epoch}_{args.image_size}.pth")
             if fabric.global_rank == 0:
-                print(f"Loading checkpoint from {args.ckpt}")
-            checkpoint = torch.load(args.ckpt, map_location='cpu')
+                print(f"Loading checkpoint from {ckpt_path}")
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
             model.load_state_dict(checkpoint)
             if fabric.global_rank == 0:
                 print("Checkpoint loaded successfully")
@@ -310,10 +316,10 @@ def main(args):
 
 def train(fabric, model, optimizer, train_loader, processor, args):
     mse_loss = torch.nn.MSELoss()
-    iter_count = 0
+    iter_count = args.resume_epoch * len(train_loader)
     total_iter = len(train_loader) * args.epochs
 
-    for epoch in range(args.epochs):
+    for epoch in range(args.resume_epoch, args.epochs):
         epoch_loss = 0.0
         epoch_loss_org = 0.0
         epoch_loss_seg = 0.0
@@ -506,6 +512,7 @@ def get_args_parser():
     parser.add_argument('--pin_mem', action='store_true', help='Pin CPU memory')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
     parser.add_argument('--ckpt', type=str, default=None, help='path to checkpoint')
+    parser.add_argument('--resume_epoch', type=int, default=0, help='Resume from this epoch')
     parser.add_argument('--world_size', default=1, type=int, help='distributed processes')
 
     # Multi-positive specific
