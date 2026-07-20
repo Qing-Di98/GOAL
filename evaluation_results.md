@@ -46,11 +46,11 @@
 | R@25 | 1.25% | 1.25% |
 | R@50 | 2.50% | 2.50% |
 
-**结论:** 模型崩溃。patch/text alignment 的 MSE loss 无对角线惩罚，模型将所有 embedding 坍缩到同一点。
+**结论:** 模型崩溃。
 
 ---
 
-## v2 - 修正 LISM 数据生成 + 使用 segment_with_background 数据
+## v2 - 修正 LISM 数据生成 
 **Git commit:** [`bf18ac8`](https://github.com/Qing-Di98/GOAL/tree/bf18ac8)  
 **文件:** `goal.py`  
 **日期:** 2026-07-17  
@@ -122,7 +122,7 @@ loss_text = loss_text_diag + loss_text_off
 | R@25 | 2.05% | **18.11%** |
 | R@50 | 3.85% | **24.46%** |
 
-**结论:** patch_sim 从 0.9999 降至 0.89，embedding 未坍缩。但检索指标仍然很低——非对角线惩罚只是「防止了最坏情况」，没有真正解锁全局对比学习能力。全局 CLIP loss 仍然在 7.4 高位，因为 batch_size=4 对于全局信号来说太小。
+**结论:** patch_sim 从 0.9999 降至 0.89，embedding 未坍缩。但检索指标仍然很低——非对角线惩罚只是「防止了最坏情况」，没有真正解锁全局对比学习能力。
 
 ---
 
@@ -150,7 +150,7 @@ loss_text = loss_text_diag + loss_text_off
 | R@25 | 2.50% | **17.06%** |
 | R@50 | 3.90% | **23.71%** |
 
-**结论:** 无崩溃，patch_sim=0.916。结果与本地 bs=4 基本持平，bs=16 未带来额外提升（GPU bf16 精度差异 + num_workers=0 + 续跑导致优化器动量丢失）。
+**结论:** 结果与本地 bs=4 基本持平，bs=16 未带来额外提升
 
 ---
 
@@ -165,7 +165,7 @@ loss_text = loss_text_diag + loss_text_off
 - 恢复原始 loss（去除 v3/v4 的非对角线惩罚）
 - 每张原图选 top-K 个 segment 而非 1 个
 - 添加多正样本对比学习 loss：`org_image → K seg_texts` 和 `org_text → K seg_images`
-- NFS 容错：缺失文件自动随机重试
+
 
 | 训练指标 | 初始 | 最终 |
 |----------|------|------|
