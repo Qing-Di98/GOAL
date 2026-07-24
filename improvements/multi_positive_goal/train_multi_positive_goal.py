@@ -388,16 +388,21 @@ def train(fabric, model, optimizer, train_loader, processor, args):
             sim_seg = model.logit_scale.exp() * x_i_best @ x_t_best.t()
             loss_seg = clip_loss(sim_seg)
 
-            # ==== Patch alignment loss (same as original, on best segment) ====
+            # ==== Build best-segment indices ====
+            best_indices = []
+            s = 0
+            for b in range(batch_size):
+                best_indices.append(s)
+                s += seg_counts[b]
+
+            # ==== Patch features from best segment bboxes ====
             vision_outputs = model.vision_model(seg_images, output_hidden_states=True)
             org_patch_tokens = vision_outputs.hidden_states[-1]
 
             patch_pooled_list = []
             seg_start = 0
             for b in range(batch_size):
-                # Use first (best) segment's bbox for patch alignment
                 bbox_dict = bboxes[seg_start]
-                # Wrap scalar bbox values as 1-element tensors for get_patch_tokens_from_bbox
                 bbox = {k: torch.tensor([v], device=org_image.device) for k, v in bbox_dict.items()}
                 img_w = org_image_sizes[b][0]
                 img_h = org_image_sizes[b][1]
@@ -413,19 +418,7 @@ def train(fabric, model, optimizer, train_loader, processor, args):
             patch_pooled = F.normalize(patch_pooled + eps, dim=-1)
             seg_image_embeds_norm = F.normalize(seg_image_embeds + eps, dim=-1)
 
-            # Use first seg per original for patch alignment
-            best_indices = []
-            s = 0
-            for b in range(batch_size):
-                best_indices.append(s)
-                s += seg_counts[b]
-            best_seg_imgs = seg_image_embeds_norm[best_indices]
-
-            sim_patch = patch_pooled @ best_seg_imgs.t()
-            patch_diag = torch.diag(sim_patch)
-            loss_patch = mse_loss(patch_diag, torch.ones_like(patch_diag))
-
-            # ==== Text alignment loss (same as original, on best segment) ====
+            # ==== Text segment features from best segments ====
             text_outputs = model.text_model(all_texts[:batch_size], output_hidden_states=True)
             org_text_tokens = text_outputs.hidden_states[-1][:batch_size]
 
@@ -440,11 +433,32 @@ def train(fabric, model, optimizer, train_loader, processor, args):
             text_pooled = model.text_model.final_layer_norm(text_pooled)
             text_pooled = model.text_projection(text_pooled)
             text_pooled = F.normalize(text_pooled + eps, dim=-1)
+            seg_text_embeds_norm = F.normalize(seg_text_embeds + eps, dim=-1)
 
-            best_seg_texts = F.normalize(seg_text_embeds[best_indices] + eps, dim=-1)
-            sim_text = text_pooled @ best_seg_texts.t()
-            text_diag = torch.diag(sim_text)
-            loss_text = mse_loss(text_diag, torch.ones_like(text_diag))
+            if args.enable_local_infonce:
+                # ==== Local InfoNCE: patch ↔ all seg images ====
+                tau = args.local_temperature
+                sim_patch = (patch_pooled @ seg_image_embeds_norm.t()) / tau  # (B, total_seg)
+                # Positive mask: each anchor's positive is its best segment
+                patch_pos_mask = torch.zeros(batch_size, total_seg, device=org_image.device)
+                for b in range(batch_size):
+                    patch_pos_mask[b, best_indices[b]] = 1.0
+                loss_patch = multi_positive_clip_loss(sim_patch, patch_pos_mask)
+
+                # ==== Local InfoNCE: text segment ↔ all seg texts ====
+                sim_text = (text_pooled @ seg_text_embeds_norm.t()) / tau  # (B, total_seg)
+                text_pos_mask = patch_pos_mask  # same: best segment per original
+                loss_text = multi_positive_clip_loss(sim_text, text_pos_mask)
+            else:
+                # Fallback: original MSE loss
+                sim_patch_mse = patch_pooled @ seg_image_embeds_norm[best_indices].t()
+                loss_patch = mse_loss(torch.diag(sim_patch_mse), torch.ones(batch_size, device=org_image.device))
+                sim_text_mse = text_pooled @ seg_text_embeds_norm[best_indices].t()
+                loss_text = mse_loss(torch.diag(sim_text_mse), torch.ones(batch_size, device=org_image.device))
+
+            # Logging: best-segment diagonal similarity (for monitoring collapse)
+            patch_diag = torch.diag(patch_pooled @ seg_image_embeds_norm[best_indices].t())
+            text_diag = torch.diag(text_pooled @ seg_text_embeds_norm[best_indices].t())
 
             # ==== Total loss ====
             loss = loss_org + 0.5 * loss_seg + loss_patch + loss_text + loss_multi
@@ -521,6 +535,13 @@ def get_args_parser():
                         help='Enable multi-positive contrastive loss')
     parser.add_argument('--disable_multi_positive', action='store_true',
                         help='Disable multi-positive contrastive loss')
+    # Local InfoNCE
+    parser.add_argument('--enable_local_infonce', default=True, action='store_true',
+                        help='Use InfoNCE for local alignment (instead of MSE)')
+    parser.add_argument('--disable_local_infonce', action='store_true',
+                        help='Disable local InfoNCE, use MSE fallback')
+    parser.add_argument('--local_temperature', type=float, default=0.07,
+                        help='Temperature for local InfoNCE loss')
     parser.set_defaults(pin_mem=True)
     return parser
 
@@ -530,6 +551,8 @@ if __name__ == "__main__":
     args = args.parse_args()
     if args.disable_multi_positive:
         args.enable_multi_positive = False
+    if args.disable_local_infonce:
+        args.enable_local_infonce = False
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
